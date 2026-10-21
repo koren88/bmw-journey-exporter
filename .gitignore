@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+
+# Local capture directories and all raw UI XML.
+bmw-journeys-*/
+bmw-export-*/
+bmw-test-*/
+bmw-validation-*/
+capture-*/
+*-capture/
+raw/
+capture-data/
+
+# Export and checkpoint files can contain private journey data even outside a capture directory.
+capture-state.json
+capture.csv
+checks.json
+manifest.json
+journeys.csv
+journeys.json
+journeys.xml
+journeys.xlsx
+
+# Review/build archives are local artifacts.
+*.zip
+*.tgz
+*.tar
+*.tar.gz
