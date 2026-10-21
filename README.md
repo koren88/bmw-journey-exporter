@@ -1,247 +1,237 @@
-# bmw-journey-exporter
+# BMW Journey Exporter
 
-An unofficial, local tool that transcribes the journey list visible in the Android My BMW app through Android Debug Bridge (ADB). It does not call BMW services or perform CarData authentication. It reads what the app currently shows and keeps the UI XML used for each capture.
+Export the journey history shown in the Android **My BMW** app to an Excel workbook.
 
-**This project is unofficial and is not affiliated with, endorsed by, or connected to BMW.** Treat exports as personal records to review, not as a verified tax or accounting log. Only history that is still available in the app can be captured.
+The tool drives your own phone over Android Debug Bridge (ADB). It opens no BMW account session of its own, calls no BMW services, and needs no CarData access. It reads the **All journeys** list that the app already displays, scrolls through it month by month, and writes `journeys.xlsx`.
 
-## Quick start
+**Unofficial project, not affiliated with or endorsed by BMW.** Treat exports as personal records to review, not as a verified tax or accounting log. Only history still available in the app can be captured.
 
-1. Install Android Platform Tools on the host and run `python bmw_export_journeys.py --doctor` after starting ADB.
-2. Enable USB debugging on the phone, connect it, accept Android's authorization prompt, then open My BMW → vehicle → **All journeys** and select the latest month you want.
-3. Capture a month range:
+## What you get
+
+- One workbook, `journeys.xlsx`, with a **Monthly summary** sheet first (completeness status, warnings, BMW totals) followed by one sheet per month in chronological order.
+- Optional CSV, JSON and XML files (see [Optional formats](#optional-formats-and-keeping-capture-data)).
+- Source values are preserved exactly as the app displays them. Dates are resolved only where the saved capture context supports it (and marked as derived or unresolved otherwise). Details the list does not show, such as start locations, departure and arrival times, and the individual trips inside a group, are left empty and never invented.
+
+**Grouped trips:** the app sometimes shows several trips as one entry (for example "3 trips"). The exporter records that entry and its trip count. It does not open groups, so **the individual trips inside a group are not exported**. The monthly summary compares represented trip counts with BMW's monthly total so you can see whether a month is complete.
+
+## Requirements
+
+**Phone and app (all platforms)**
+
+- An Android phone with the My BMW app, signed in, with the **English** app language. Other languages and layouts are detected as unsupported.
+- USB debugging enabled and a USB cable (see [Prepare the phone](#prepare-the-phone)).
+
+**Computer**
+
+| Platform | Needs | Status |
+| --- | --- | --- |
+| macOS (recommended) | [Docker Desktop](https://www.docker.com/products/docker-desktop/), Android Platform Tools (`adb`), GNU Make, Git | Phone capture tested |
+| Linux | Docker, Android Platform Tools, GNU Make, Git | Offline tests only; phone capture unverified |
+| Windows | Python 3.9+, Android Platform Tools, Git | Offline tests only; phone capture unverified |
+
+Install Android Platform Tools from [developer.android.com/tools/releases/platform-tools](https://developer.android.com/tools/releases/platform-tools) or a package manager (on macOS: `brew install --cask android-platform-tools`). GNU Make comes with the macOS developer tools; on Linux you may need to install it (for example `sudo apt install make`).
+
+## Get the code
 
 ```sh
-python3 bmw_export_journeys.py --from-month 2025-01 --to-month 2025-06 --output ./bmw-capture
+git clone https://github.com/koren88/bmw-journey-exporter.git
+cd bmw-journey-exporter
 ```
 
-By default, a successful export contains only `journeys.xlsx`. `--formats xlsx,csv` also writes CSV, and `--formats all` writes XLSX, CSV, JSON, and XML. Selecting fewer formats does not remove reports from an earlier run; only the selected output filenames are replaced. Exit status `0` means every requested month matched the app trip count and requested reports validated; `2` means the capture is incomplete or the CLI rejected its arguments (argparse usage errors also use `2`); `1` means runtime/preflight or report validation failed. GNU Make may report its own recipe failure status rather than preserving every underlying process exit code. Completeness status and warnings appear in the workbook's Monthly summary.
+Without Git, use **Code → Download ZIP** on the GitHub page, unzip it, and `cd` into the folder.
 
-## Make quick start
+## Prepare the phone
 
-GNU Make is a convenience interface on macOS and Linux. Capture, doctor, report, and merge use Docker; capture does not need Python installed on the host. Docker and host Android Platform Tools are required for phone operations. `make setup` is optional and creates a project-local `.venv` for Python use; it does not install Python, ADB, Docker, or system packages. `make test` prefers `.venv/bin/python` when available, then uses `python3`; set `PYTHON=/path/to/python` to select a specific interpreter. If the selected interpreter lacks project dependencies, Make uses the documented Docker test fallback when Docker is available.
+Do these steps in order before running `make doctor` or any capture:
+
+1. **Enable Developer options:** *Settings → About phone*, then tap **Build number** seven times. (On some phones it is under *About phone → Software information*.)
+2. **Enable USB debugging:** *Settings → System → Developer options → USB debugging* (menu names vary by manufacturer).
+3. **Connect the phone by USB**, unlock it, and accept the **Allow USB debugging?** prompt (tick "Always allow from this computer" if offered).
+4. **Open My BMW → your vehicle → All journeys**, then select the **latest month you want to export**. Capture moves backward from this month, so open the newest month in your range first.
+5. Keep the phone unlocked and leave the app on that screen. Do not touch the phone while a capture is running.
+
+## Recommended path: macOS with Docker and Make
+
+The Make commands run the exporter in a Docker container that talks to the ADB server on your Mac. The first run builds the image, which takes a few minutes. If no ADB server is running, the macOS launcher starts one for you (this does not reset device authorizations).
+
+Check that everything is connected and the phone shows the **All journeys** list:
 
 ```sh
-make help
 make doctor
-make capture YEAR=2026 TIMEZONE=Europe/Ljubljana
-make capture MONTH=2026-10 TIMEZONE=Europe/Ljubljana
-make capture FROM=2026-09 TO=2026-10 TIMEZONE=Europe/Ljubljana
-make capture YEAR=2026 FORMATS=xlsx,csv
-make resume OUTPUT='./my-capture'
-make report INPUT='./my-capture'
-make merge INPUTS='./capture one:./capture two' OUTPUT='./merged capture'
-make test
 ```
 
-When `OUTPUT` is omitted for `make capture`, Make creates a unique `./bmw-export-<timestamp>-<pid>` directory. Resume requires an existing `OUTPUT`; selection and settings are loaded from its manifest if omitted. Explicit selection or settings that disagree with the manifest are rejected. `FORMATS` accepts `xlsx` (default), comma-separated selections such as `xlsx,csv`, or `all`. `KEEP_CAPTURE=1` retains data needed for resume, merge, and report regeneration; `KEEP_DEBUG=1` retains that data plus raw XML. Paths containing spaces are preserved. For merge, `INPUTS` is a colon-separated list; a colon inside an individual path is not supported. Make's Docker report and merge inputs must be paths inside this repository's mount, expressed relative to the repository root (for example, `INPUT='./my-capture'`). The Docker launcher mounts only the repository at `/workspace`; host paths outside it are not accessible through `make report` or `make merge`. For an external capture, use the local Python CLI alternative below. All Make actions ultimately use the Python CLI, while phone actions and offline report/merge use the shared Docker launcher. Direct CLI and `docker-macos.sh` remain available.
+`make doctor` only reads the screen. It never taps, swipes or navigates.
 
-Equivalent direct CLI examples:
+### First successful export
+
+Export one month, keep the phone awake during the run, and save to a folder of your choice:
 
 ```sh
-python bmw_export_journeys.py --year 2026 --timezone Europe/Ljubljana --output ./bmw-export-2026
-python bmw_export_journeys.py --month 2026-10 --timezone Europe/Ljubljana --output ./bmw-october
-python bmw_export_journeys.py --from-month 2026-09 --to-month 2026-10 --timezone Europe/Ljubljana --output ./bmw-sep-oct
-python bmw_export_journeys.py --resume --output './existing capture'
-python bmw_export_journeys.py --report-only './existing capture'
-python bmw_export_journeys.py --month 2026-10 --formats xlsx,csv --output ./bmw-october
-python bmw_export_journeys.py --merge './capture one' --merge './capture two' --output './merged capture'
+make capture MONTH=2026-10 TIMEZONE=Europe/Berlin KEEP_AWAKE=1 OUTPUT=./october-2026
 ```
 
-The local CLI can read an existing capture anywhere the host Python process can access. After `make setup`, for example, regenerate reports from an external capture without Docker:
+- Replace `2026-10` with the latest month you opened in the app, and `Europe/Berlin` with [your own IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones). The container otherwise assumes UTC, which can shift capture dates near midnight and month boundaries.
+- `KEEP_AWAKE=1` temporarily extends the phone's screen timeout to two hours and restores your original setting when the run ends.
+- Other selections: `YEAR=2026` (January through the current month for the current year), or `FROM=2026-09 TO=2026-10` for an inclusive range. Open the **last** month of the range first.
+- `OUTPUT` must not exist yet. If you omit it, Make creates `./bmw-export-<timestamp>-<pid>`.
+
+When the run succeeds, your workbook is **`october-2026/journeys.xlsx`** inside the repository folder, and the temporary working data is removed. Exit status `0` means every requested month matched BMW's trip count and the workbook validated. Open the **Monthly summary** sheet first and check each month's status and warnings.
+
+Docker paths must stay inside the repository: `OUTPUT`, `INPUT` and `INPUTS` are resolved relative to it, and paths outside it are rejected. To use a folder elsewhere, the supported alternative is the [local Python CLI](#advanced-usage); manually configured Docker mounts are possible but not provided or tested by the launchers.
+
+## If a capture is interrupted
+
+Working data is saved as the run progresses, under `<OUTPUT>/capture-data/`. If the run stops (Ctrl+C, locked phone, unplugged cable, screen change, a month whose count does not match BMW, or a report failure), that data is **kept automatically** and the tool prints the commands to continue. You do not need any option for this.
+
+To continue: reconnect and unlock the phone, reopen **All journeys** on the same latest month you started with, then run:
 
 ```sh
-./.venv/bin/python bmw_export_journeys.py --report-only '/absolute/path/to/bmw-capture'
+make resume OUTPUT=./october-2026
 ```
 
-This local-Python command does not connect to ADB. The Docker launcher currently mounts only the repository; external host-path mounting has not been implemented or tested.
+Resume loads the saved month selection and settings (including `KEEP_AWAKE`). Settings you pass that disagree with the saved ones are rejected. If resume cannot match the screen against the saved rows (for example because repeated identical entries make a boundary ambiguous), it stops without changing saved data.
 
-The app UI must be English and expose the exact **All journeys** label and supported package `de.bmw.connected.mobile20.row`. Other languages, app layouts, and package names are detected as unsupported. Capture one month with `--month 2025-05`, or a year with `--year 2025`. Past years include January–December; the current year includes January through the current month. Future requests are rejected. Capture navigates backward, so open the latest requested month first. The user must perform initial navigation into My BMW, the correct vehicle, **All journeys**, and that month.
+A month is **complete** only when the represented trip count equals BMW's monthly total and the bottom of the list was reached. Statuses in the summary: `complete`, `incomplete` (mismatch or interrupted), `failed` (nothing usable captured) and `pending` (not attempted). Exit status `2` means the capture finished but is incomplete.
 
-## Docker on macOS (launcher provided; phone capture tested)
+## Optional formats and keeping capture data
 
-Docker Desktop is required. USB devices are not generally passed directly to the Linux container by Docker Desktop; for capture, the launcher connects to the host ADB server. It builds or refreshes the image when source files change, starts ADB only if no server is listening (and explains why), and verifies container-to-host connectivity before forwarding capture arguments. It does not start ADB for `--help`, `--report-only`, or `--merge`.
+By default, a successful capture leaves only `journeys.xlsx`. To also write other formats at capture time:
 
 ```sh
-./docker-macos.sh --doctor
-./docker-macos.sh --month 2025-05 --timezone Europe/Ljubljana --output ./bmw-capture
+make capture MONTH=2026-10 TIMEZONE=Europe/Berlin KEEP_AWAKE=1 OUTPUT=./october-2026 FORMATS=xlsx,csv
 ```
 
-The macOS Docker capture path has now been exercised with an authorized phone. The launcher stops before capture if Docker Desktop cannot reach `host.docker.internal:5037`. The CLI does not start or reconfigure ADB; the existing macOS launcher starts ADB only when no server is listening and explains that action.
+`FORMATS` accepts `xlsx`, a comma-separated list from `xlsx,csv,json,xml`, or `all`.
 
-## Docker on Windows and Linux
+Recovery data after an *interrupted* run is automatic. A separate option, **`KEEP_CAPTURE=1`**, keeps the working data after a *successful* run so you can later regenerate reports or merge captures. Without it, successful runs delete that data and cannot be turned into other formats afterwards.
 
-Build the image with `docker build -t bmw-journey-exporter .` after installing Docker. Install Android Platform Tools on the host, connect the phone, and accept its authorization prompt. If you choose to start the host server, run `adb start-server` yourself after reviewing its effect. On Windows Docker Desktop, use `host.docker.internal:5037`; in PowerShell, mount an absolute Windows path, for example:
+```sh
+# Capture and keep the data for later
+make capture MONTH=2026-10 TIMEZONE=Europe/Berlin KEEP_AWAKE=1 OUTPUT=./october-2026 KEEP_CAPTURE=1
+
+# Later, offline (no phone needed): write more formats from the retained data
+make report INPUT=./october-2026 FORMATS=xlsx,csv,json
+
+# Merge retained captures from different runs into a new folder.
+# ./september-2026 must be a separate capture (e.g. MONTH=2026-09 OUTPUT=./september-2026)
+# that was also made with KEEP_CAPTURE=1; captures without retained data cannot be merged.
+make merge INPUTS='./september-2026:./october-2026' OUTPUT=./merged-2026
+```
+
+- `KEEP_DEBUG=1` also keeps the raw screen XML (it implies `KEEP_CAPTURE=1`). The XML contains whatever the app displayed, such as addresses, so treat it as private.
+- `make report` writes the selected files into the capture folder and leaves other report files from earlier runs in place.
+- `make merge`: `INPUTS` is a colon-separated list (a colon inside a path is not supported) and `OUTPUT` must be new. Sources must be captures whose data was retained. Overlaps are only merged when the sequence alignment is provable; conflicting values stop the merge unless you set `CONFLICT=keep-first` or `CONFLICT=keep-last`. A merged month is `complete` only if at least one source was individually complete and the merged counts still match BMW's total. Merged data can be reported and merged again but cannot resume a phone capture.
+
+## Reading the output
+
+XLSX month sheets contain these columns, in order: `month`, `list_sequence`, `week_context`, `destination`, `destination_label`, `displayed_date_time`, `resolved_date`, `date_basis`, `distance_km_numeric`, `distance_km_source`, `duration_numeric`, `duration_displayed`, `consumption_displayed`, `grouped_trip_count`, `start_location`, `departure_time`, `arrival_time`.
+
+- Grouped entries are highlighted and carry their trip count in `grouped_trip_count`.
+- Distances shown by the app are rounded. BMW's monthly distance and the sum of the displayed entry distances are shown separately in the summary because they can differ.
+- `displayed_date_time` is kept verbatim. `resolved_date` is filled only when the displayed text and the saved capture date agree (for example "Wednesday" under a known week). `date_basis` says how the date was derived or why it stayed unresolved.
+- `start_location`, `departure_time` and `arrival_time` exist as columns but are left empty, because the list does not show them.
+- CSV, JSON and XML additionally contain technical fields (raw text, source XML name, capture date, provenance and merge conflicts). Source text is preserved exactly, so spreadsheet software may treat CSV cells starting with `=`, `+`, `-` or `@` as formulas; prefer the XLSX file for opening in Excel, which stores source strings as literal text.
+
+## Windows and Linux
+
+Phone capture on Linux and Windows has **not** been verified on real hardware. The offline test suite runs in CI on macOS, Linux and Windows, but those tests use no phone, USB authorization or Docker-to-host ADB networking. Expect to troubleshoot.
+
+**Windows (native Python, PowerShell).** GNU Make and the Docker launchers are not used. Install Python 3.9+ and Android Platform Tools, then from the repository folder:
 
 ```powershell
-New-Item -ItemType Directory -Force bmw-capture
-docker run --rm -v "${PWD}/bmw-capture:/capture" -e ADB_SERVER_SOCKET=tcp:host.docker.internal:5037 bmw-journey-exporter --month 2025-05 --timezone Europe/Ljubljana --output /capture/run
-```
-
-On Linux, use the provided launcher with an explicit host ADB address. It uses Docker host networking, checks the ADB protocol from a container, and never starts or reconfigures the ADB server:
-
-```sh
-BMW_ADB_HOST=127.0.0.1 BMW_ADB_PORT=5037 ./docker-linux.sh --doctor
-BMW_ADB_HOST=127.0.0.1 BMW_ADB_PORT=5037 ./docker-linux.sh --month 2025-05 --timezone Europe/Ljubljana --output ./bmw-capture
-```
-
-The address must already be reachable from a Linux container using `--network host`. Set `BMW_ADB_HOST` to the host/IP where the existing server listens. Do not expose the ADB server to an untrusted network. The Linux launcher's arguments and network setup have offline fake-Docker tests; real Linux phone capture has not been exercised.
-
-The shared Docker launchers mount only this repository at `/workspace`. Capture/resume outputs and report/merge inputs must resolve inside the repository. Absolute paths inside it are translated to `/workspace/...`; paths outside it, including paths escaping through `..` or symlinks, are rejected before Docker runs. Use the local Python CLI for captures or reports stored elsewhere. On Linux, launcher containers run as the invoking user's numeric UID/GID so files written into the bind mount are not left owned by root. This UID/GID behavior has offline argument coverage but has not been exercised on a real Linux Docker host.
-
-Windows Docker/phone capture remains unverified. Windows instructions below use native Python/PowerShell or WSL; WSL does not automatically gain access to a USB-connected phone.
-
-## Windows native Python and WSL
-
-GNU Make is not assumed to be installed on Windows. For native PowerShell, install Python and Android Platform Tools yourself, install project dependencies, then use the CLI directly:
-
-```powershell
-py -m pip install -r requirements.txt
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 adb start-server
-adb devices
-# Unlock and authorize the phone, then open the correct vehicle's All journeys screen.
-py bmw_export_journeys.py --doctor
-py bmw_export_journeys.py --from-month 2026-09 --to-month 2026-10 --timezone Europe/Ljubljana --output '.\bmw capture'
-py bmw_export_journeys.py --resume --output '.\bmw capture'
-py bmw_export_journeys.py --report-only '.\bmw capture'
+adb devices            # the phone should be listed as "device", not "unauthorized"
+# Prepare the phone as described above (All journeys, latest month open), then:
+python bmw_export_journeys.py --doctor
+python bmw_export_journeys.py --month 2026-10 --keep-awake --output '.\october-2026'
+python bmw_export_journeys.py --resume --output '.\october-2026'
 ```
 
-For WSL, install GNU Make, Python or Docker, and Android Platform Tools inside the Linux environment as appropriate. `make capture` uses `docker-linux.sh` and requires `BMW_ADB_HOST` to name an ADB server reachable from the container. USB access from WSL is not automatic; configure and verify the phone/ADB connection in WSL before running `make doctor`. Windows native phone capture, WSL USB access, and WSL Docker networking have not been tested here.
+The workbook appears at `october-2026\journeys.xlsx`. WSL does not automatically get access to a USB phone; set that up yourself before trying any Linux instructions inside it.
 
-## Compatibility and testing status
+**Linux (Docker and Make).** The Linux launcher does not start or reconfigure ADB, and it runs the container with host networking. Start the ADB server yourself, then tell the launcher which address the container should use to reach it:
 
-| Environment | Offline tests | Phone capture | Notes |
-| --- | --- | --- | --- |
-| macOS + Docker | Verified locally | Verified on an authorized phone | Doctor, uninterrupted October, interrupted/resumed October, September–October, and January–October runs completed. |
-| Linux + Docker | CI and fake-launcher tests configured; real host not exercised | Unverified | Linux launcher requires explicit `BMW_ADB_HOST` and host networking. |
-| Windows native | CI tests configured | Unverified | Use Python/PowerShell; Make is not assumed available. |
-| WSL | Linux guidance only | Unverified | USB access and Docker networking require user setup. |
+```sh
+adb start-server
+export BMW_ADB_HOST=127.0.0.1     # host/IP where the existing ADB server listens
+export BMW_ADB_PORT=5037          # optional; 5037 is the default
+make doctor
+make capture MONTH=2026-10 TIMEZONE=Europe/Berlin KEEP_AWAKE=1 OUTPUT=./october-2026
+```
 
-CI runs offline tests on macOS, Windows, and Linux. Those tests do not verify a physical phone, USB authorization, or Docker-to-host ADB networking.
+`BMW_ADB_HOST` is required for every Linux phone command (`make doctor`, `capture`, `resume`); `make report` and `make merge` do not need it. Do not expose the ADB server to an untrusted network. Launcher containers run as your user ID so output files are not owned by root; this has offline argument tests only.
 
-## ADB diagnostics and phone availability
+Alternatively, run the Python CLI directly on Linux or macOS with `make setup` followed by `./.venv/bin/python bmw_export_journeys.py ...`.
 
-`python bmw_export_journeys.py --doctor` checks the ADB executable, an already-running ADB server, connected/authorized devices, and the supported My BMW screen. It dumps UI XML but does not tap, swipe, open the app, or navigate. It attempts to remove only its exact temporary dump file from the device; if ADB disconnects or cleanup is denied, it warns that the file may remain. Capture also removes only its own exact temporary XML file on exit. USB debugging, authorization, and initial navigation into the correct vehicle and **All journeys** screen are user actions.
+## Advanced usage
 
-The optional `--keep-awake` temporarily changes Android's screen timeout to two hours. Before changing it, the tool checkpoints the original timeout and device serial locally, then attempts restoration on normal exit, Ctrl+C, and SIGTERM. A resumed session checks for unresolved restoration records first. It carries forward the original timeout only when the selected device and current applied value match; otherwise it stops without changing the setting and provides guidance. If restoration fails, it prints a manual `adb -s SERIAL shell settings put system screen_off_timeout VALUE` command using the saved values. Restoration cannot be promised after SIGKILL, a device disconnection, or loss of ADB connectivity.
-
-## Local Python alternative
-
-Python 3.9 or newer, pip, and host Android Platform Tools are required for local use. Python 3.9 is the API/syntax minimum; the configured CI currently exercises Python 3.12 rather than 3.9. No Python installation is required inside the phone.
+**Local Python CLI** (any platform; the supported way to use capture folders outside the repository):
 
 ```sh
 python3 -m venv .venv
-. .venv/bin/activate                 # Windows PowerShell: .venv\Scripts\Activate.ps1
+. .venv/bin/activate               # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python bmw_export_journeys.py --month 2025-05 --output ./bmw-capture
+adb start-server                   # the CLI never starts or restarts ADB itself
+python bmw_export_journeys.py --doctor
+python bmw_export_journeys.py --from-month 2026-09 --to-month 2026-10 --keep-capture --output ./sep-oct-2026
+
+# Later, offline: needs the data retained by --keep-capture
+python bmw_export_journeys.py --report-only ./sep-oct-2026 --formats all
+python bmw_export_journeys.py --merge ./sep-oct-2026 --merge ./other-capture --output ./merged   # ./other-capture also made with --keep-capture
+
+# Alternative, only after an interrupted or incomplete capture (recovery data is kept automatically)
+python bmw_export_journeys.py --resume --output ./sep-oct-2026
 ```
 
-Use `python` instead of `python3` on Windows where appropriate. Run `python bmw_export_journeys.py --help` for all options.
+Run `python bmw_export_journeys.py --help` for all options. Useful ones: `--serial` (required when several authorized devices are connected), `--timezone`, `--pause SECONDS` (minimum 0.5), `--max-pages`, `--keep-capture`, `--keep-debug`, `--keep-awake`, `--conflict {error,keep-first,keep-last}`.
 
-## Selecting dates and devices
+**Label substitution.** `--replace-label OLD=NEW` (repeatable) replaces whole-value matches in the added `destination_label` column (XLSX, CSV, JSON, XML) and `start_location_label` (CSV, JSON, XML only; the XLSX `start_location` column always shows the source value). Original `destination` and `start_location` values are never changed. It is available on the Python CLI with capture, `--report-only` and `--merge`, not through Make:
 
 ```sh
-# One month (make sure the output directory does not already exist)
-python bmw_export_journeys.py --month 2025-05 --output ./capture-may
-
-# Inclusive month range; open June in the app before starting
-python bmw_export_journeys.py --from-month 2025-01 --to-month 2025-06 --output ./capture-h1
-
-# The macOS Docker launcher forwards timezone configuration
-./docker-macos.sh --from-month 2025-01 --to-month 2025-06 --timezone Europe/Ljubljana --output ./capture-h1
-
-# Past year; open December in the app first
-python bmw_export_journeys.py --year 2025 --output ./capture-2025
-
-# Current year through the present month; October 2026 means January–October
-python bmw_export_journeys.py --year 2026 --output ./capture-2026
-
-# Several authorized devices: select one explicitly
-python bmw_export_journeys.py --month 2025-05 --serial ANDROID-DEVICE-01 --output ./capture-may
+python bmw_export_journeys.py --report-only ./october-2026 --replace-label 'Home=Personal base'
 ```
 
-Month values must use `YYYY-MM`. The start month must not follow the end month. `--timezone` accepts an IANA timezone such as `Europe/Ljubljana`; it controls the saved capture date, session offsets, and which month counts as current. Without it, the host local timezone is used. The timezone is saved in session metadata and must match to resume. The Docker launcher forwards this argument. With multiple authorized devices, provide `--serial`; with one, the CLI selects it. Unauthorized and offline devices are not treated as available. The tool checks ADB state before opening the UI.
+**Exit statuses.** `0`: complete and reports validated. `1`: runtime, preflight or report validation error. `2`: incomplete capture or merge, or an invalid command line. Make may report its own failure status instead of the underlying one.
 
-## Recovery and resume
+**Screen timeout.** With `--keep-awake`, the original timeout is saved locally before it is changed and restored on normal exit, Ctrl+C and SIGTERM. If restoration fails, the tool prints an `adb -s SERIAL shell settings put system screen_off_timeout VALUE` command to restore it manually. Restoration cannot be guaranteed after a hard kill or a lost connection; a later resume checks for an unresolved record first and refuses to guess if the device or value does not match.
 
-Capture writes checkpoints and a readable source CSV under `capture-data/`, with raw XML under `capture-data/raw/` while the run is active. Existing legacy capture directories with files at their root remain supported. Keep the phone awake and on the journey list. If the screen changes, the phone locks, ADB disconnects, the process is interrupted, a month count differs, or report generation fails, recovery data is retained and the tool prints exact resume commands. Unlock the phone, reconnect/authorize ADB, reopen the same journey list and latest requested month, then resume:
+**Phone-side files.** Each UI dump is a temporary XML file on the phone (`/sdcard/bmw-export-*.xml`, or `/sdcard/bmw-doctor-*.xml` for doctor). The tool removes only its own exact file when it exits and warns if that fails.
 
-```sh
-python bmw_export_journeys.py --resume --output ./bmw-capture
-```
+**Data on disk.** New captures keep working data in `<output>/capture-data/` (checkpoints, a source CSV, `checks.json` status record, and raw XML in `raw/` while active). Legacy capture folders with files at their root still work. Cleanup removes only files created by the capture; existing user folders are never migrated or cleaned automatically. Everything under `capture-data/` and all report files are covered by `.gitignore`.
 
-`--resume` loads the saved selection and settings from `capture-data/capture-state.json` or `capture-data/manifest.json` when omitted (legacy root-level captures also work). Explicit selection and settings must agree with the manifest. It preserves each row's original capture date and source session, and continues raw XML numbering. Repeated identical rows can make a UI boundary ambiguous, in which case resume stops safely. Grouped rows stay grouped.
-
-Merged selections may intentionally be non-contiguous; only months named in the source selections are included. Merged datasets support report generation and further merging, but not phone resume. Resume on a merged dataset is rejected with an explanation.
-
-After all requested months are complete, app counts match, and every selected report has been saved and validated, temporary capture data is removed by default. Only files owned by the capture session are eligible for cleanup; unrelated files are preserved. Interrupted, failed, incomplete, and report-validation-failure runs always retain recovery data. Successful `--keep-capture` exports preserve checkpoint/CSV/manifest data without raw XML. `--keep-debug` implies `--keep-capture` and preserves raw XML too. Without `--keep-capture`, generating additional formats later or merging this export later is not possible; choose retention when starting the capture. Existing user capture directories are never automatically migrated or cleaned up.
-
-A `complete` month means represented trip counts match the app's monthly total and the list bottom was detected. `incomplete` means a mismatch or interrupted capture; `failed` means no usable capture was produced; `pending` means requested but not attempted. Every requested month appears in the XLSX summary with its status and warnings. A genuinely empty month has zero entries and a zero app trip count. Never treat a partial month as complete. When capture data is retained, `capture-data/checks.json` is the machine-readable status record.
-
-## Merge existing captures
-
-Merge capture directories in list order. Session IDs and stable opaque source capture identifiers are retained for provenance; absolute host directory paths are not copied into public exports:
+**Exploring group contents.** Whether this app version exposes individual trips inside a group has not been established, and no sample has been collected. If you want to investigate, save the UI before and after opening one grouped row, remove VINs, addresses and other personal details before sharing, and open an issue:
 
 ```sh
-python bmw_export_journeys.py --merge ./capture-a --merge ./capture-b --output ./merged-capture
-```
-
-The default `--conflict error` refuses uncertain ordering, different source values for overlapping entries, or conflicting app totals. Choose `--conflict keep-first` or `--conflict keep-last` to record an explicit resolution for conflicting source values. Ambiguous identical-row boundaries remain an error because UI text alone cannot prove which identical row is the same trip. The output folder must be new.
-
-A merged month is complete only when at least one individually complete source proves full coverage (its rows represent its expected app count), the sequence alignment is proven, and the merged rows still match the selected expected count. Partial sources may extend or overlap that proven complete sequence. Matching totals across partial sources alone never prove completeness.
-
-## Reports without a phone
-
-Regenerate reports from an existing capture folder offline. XLSX is the default. The versioned `capture-data/capture-state.json` is preferred when present; older portable captures can use root-level `capture.csv` or `journeys.csv` with `checks.json`. Select formats with `--formats xlsx,csv` or `--formats all`:
-
-```sh
-python bmw_export_journeys.py --report-only ./bmw-capture --formats all
-```
-
-This reads saved capture data and does not invoke ADB. It writes only the selected reports into that directory and preserves any other previously generated report files. A normal successful capture leaves `journeys.xlsx` only; use `--keep-capture` when you need to regenerate other formats later or merge the capture with another saved export.
-
-- **XLSX:** `Monthly summary` is first, followed by chronological `YYYY-MM` sheets, including requested months with no rows. Counts, distance, and duration use numeric cells; resolved dates use date cells with the displayed source text alongside them. Headers are styled and frozen, filters and readable widths are set, grouped rows are highlighted, and monthly totals are included. BMW distance remains separate from summed displayed distances because rounding differs. Workbook relationships/styles are checked and openpyxl reopens the workbook before report files replace earlier ones.
-- **CSV:** one row per captured list entry, with source fields, capture date, resolved date and date provenance. Source strings are preserved verbatim; spreadsheet software may interpret cells beginning with `=`, `+`, `-`, or `@` as formulas. For opening in Excel, prefer the XLSX report, which writes source strings as literal text. Canonical source values are not altered.
-- **JSON:** entries plus monthly checks.
-- **XML:** one `entry` element per captured list entry.
-
-The displayed date/time is retained verbatim. Full and abbreviated weekdays, `THIS WEEK`, `LAST WEEK`, and explicit `WEEK OF` headings are resolved only when consistent with that row's saved capture date. A missing capture date is never silently replaced by today's date. `date_basis` marks derived, contradictory, or unresolved values. Start locations, departure times, arrival times, and trip legs are not inferred. Captures contain list entries, not necessarily individual trips.
-
-Optional label substitutions apply only to the added `destination_label` / `start_location_label` report columns; the original destination and start-location source values remain unchanged. Examples use fictional labels:
-
-```sh
-python bmw_export_journeys.py --report-only ./bmw-capture --replace-label 'Home=Personal base' --replace-label 'Work=Office'
-```
-
-Never put personal addresses in command history or shared logs.
-
-## Maintainer-reported phone validation
-
-The maintainer reports successful macOS + Docker validation with an authorized Android phone and the English My BMW journey list. This included doctor, uninterrupted and interrupted/resumed captures, a multi-month capture, and a January–October capture. These results are specific to that tested setup; saved full-year files are not available in this workspace for reinspection. Linux and Windows phone capture remain unverified. CI and launcher tests are offline and do not establish phone or platform networking compatibility.
-
-## Data limits
-
-An app list entry can represent one trip or a grouped set of trips. This exporter preserves grouped counts; it does not split groups or fabricate per-leg distance/duration. The current script does not open groups. Whether this My BMW version exposes individual trips inside a group has not been established from UI evidence. To investigate, enable USB debugging and, with the vehicle list open, capture the group before and after opening it:
-
-```sh
-adb devices
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
 adb exec-out cat /sdcard/window.xml > before-group.xml
-# Tap one grouped row in the phone UI, wait for it to finish opening, then:
+# Open one grouped row on the phone, wait for it to finish, then:
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
 adb exec-out cat /sdcard/window.xml > opened-group.xml
 ```
 
-Review both files locally and replace or remove VINs, addresses, account identifiers, dates, destinations, and other real journey details before sharing. Keep the two files paired so the UI change can be compared. A real device was available for macOS capture validation, but no before/after XML sample showing group-open behavior was collected. Whether this app version exposes individual trips inside a group remains unverified.
+**Docker without the launchers** (Windows Docker Desktop; unverified): `docker run --rm -v "${PWD}/bmw-capture:/capture" -e ADB_SERVER_SOCKET=tcp:host.docker.internal:5037 bmw-journey-exporter --month 2026-10 --output /capture/run` after `docker build -t bmw-journey-exporter .`.
 
-Raw XML preserves what the UI exposed. Distance and date fields are app display values, not independent measurements. The source script does not establish departure/arrival semantics for displayed times.
+## Tested versus unverified
+
+| Environment | Offline tests (CI) | Phone capture |
+| --- | --- | --- |
+| macOS + Docker + Make | Run in CI | Verified by the maintainer with an authorized phone: doctor, single month, interrupted and resumed capture, multi-month capture |
+| Linux + Docker + Make | Run in CI, using a fake Docker | **Unverified** |
+| Windows native Python | Run in CI | **Unverified** |
+| WSL | Not covered | **Unverified** |
+
+The phone results apply only to the maintainer's phone, app version and English UI. Offline tests do not establish compatibility with other phones, app versions, USB authorization, or Docker-to-host ADB networking. The local Python CLI is documented for Python 3.9 or newer, but CI exercises only 3.12.
 
 ## Development
 
-Tests use sanitized, fictional XML only:
+Tests use sanitized, fictional XML only and need no phone:
 
 ```sh
-python -m unittest discover -s tests -v
+make test                                 # or: python -m unittest discover -s tests -v
 python bmw_export_journeys.py --help
 ```
 
-Contributions should preserve original source values, avoid real journey data in fixtures, and include tests for parsing/report changes. Do not add BMW account authentication or API scraping. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`make test` prefers `.venv/bin/python`, then `python3`, and falls back to Docker if project dependencies are missing; set `PYTHON=/path/to/python` to choose an interpreter. Contributions should preserve original source values, avoid real journey data in fixtures, and include tests for parser, merge, date, report and launcher changes. Do not add BMW account authentication or private API calls. See [CONTRIBUTING.md](CONTRIBUTING.md).
