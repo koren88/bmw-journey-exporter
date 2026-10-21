@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@unittest.skipUnless(shutil.which('make') and os.name != 'nt', 'GNU Make shell integration is exercised on macOS/Linux')
+@unittest.skipUnless(os.name == 'posix' and shutil.which('sh') and shutil.which('make'), 'POSIX Make shell integration is exercised on macOS/Linux')
 class MakeInterfaceTests(unittest.TestCase):
     def run_make(self, target, **variables):
         command = ['make', '--no-print-directory', target]
@@ -69,6 +69,7 @@ class MakeInterfaceTests(unittest.TestCase):
         self.assertIn('KEEP_CAPTURE must be',result.stderr)
 
 
+@unittest.skipUnless(os.name == 'posix' and shutil.which('sh') and shutil.which('make'), 'POSIX Make shell integration is exercised on macOS/Linux')
 class MakeTestEnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -82,7 +83,7 @@ class MakeTestEnvironmentTests(unittest.TestCase):
         self.fakebin.mkdir()
         self.log = self.root / 'calls.log'
         launcher = self.root / 'docker-launch.sh'
-        launcher.write_text('#!/bin/sh\nprintf "docker:%s\\n" "$1" >> "$TEST_LOG"\nexit 0\n')
+        launcher.write_text('#!/bin/sh\nprintf "docker:%s\\n" "$1" >> "$TEST_LOG"\nexit 0\n', encoding='utf-8')
         launcher.chmod(0o755)
 
     def tearDown(self):
@@ -95,7 +96,7 @@ class MakeTestEnvironmentTests(unittest.TestCase):
             f'if [ "$1" = "-c" ]; then echo "{name}:probe" >> "$TEST_LOG"; exit {0 if usable else 1}; fi\n'
             f'echo "{name}:run" >> "$TEST_LOG"\n'
             'exit 0\n'
-        )
+        , encoding='utf-8')
         path.chmod(0o755)
         return path
 
@@ -105,11 +106,11 @@ class MakeTestEnvironmentTests(unittest.TestCase):
             env['PYTHON'] = str(python_override)
         if docker:
             docker_stub = self.fakebin / 'docker'
-            docker_stub.write_text('#!/bin/sh\nexit 0\n')
+            docker_stub.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
             docker_stub.chmod(0o755)
         result = subprocess.run([self.make, '--no-print-directory', 'test'], cwd=self.root,
                                 env=env, text=True, capture_output=True)
-        calls = self.log.read_text().splitlines() if self.log.exists() else []
+        calls = self.log.read_text(encoding='utf-8').splitlines() if self.log.exists() else []
         return result, calls
 
     def test_uses_project_venv_before_global_python_or_docker(self):
@@ -141,7 +142,7 @@ class MakeTestEnvironmentTests(unittest.TestCase):
 
     def test_report_path_is_preserved_under_project_docker_mount(self):
         uname = self.fakebin / 'uname'
-        uname.write_text('#!/bin/sh\necho Linux\n')
+        uname.write_text('#!/bin/sh\necho Linux\n', encoding='utf-8')
         uname.chmod(0o755)
         docker_log = self.root / 'docker.log'
         docker = self.fakebin / 'docker'
@@ -152,7 +153,7 @@ class MakeTestEnvironmentTests(unittest.TestCase):
             'printf "\\n" >> "$DOCKER_LOG"\n'
             'case "$1" in image) exit 1 ;; build|run) exit 0 ;; esac\n'
             'exit 1\n'
-        )
+        , encoding='utf-8')
         docker.chmod(0o755)
         env = os.environ.copy()
         env.update(PATH=f'{self.fakebin}:{env["PATH"]}', DOCKER_LOG=str(docker_log))
@@ -161,7 +162,7 @@ class MakeTestEnvironmentTests(unittest.TestCase):
                                      f'INPUT=./{Path(input_dir).name}'],
                                     cwd=ROOT, env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            calls = docker_log.read_text()
+            calls = docker_log.read_text(encoding='utf-8')
             self.assertIn(f'ARG:{ROOT}:/workspace', calls)
             self.assertIn('ARG:-w\nARG:/workspace', calls)
             self.assertIn(f'ARG:--report-only\nARG:/workspace/{Path(input_dir).name}', calls)

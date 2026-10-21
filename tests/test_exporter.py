@@ -73,7 +73,7 @@ class ExporterTests(unittest.TestCase):
     def test_confirmed_resume_initialization_regressions(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp); (folder/'raw').mkdir()
-            (folder/'raw'/'screen-00001.xml').write_text('old')
+            (folder/'raw'/'screen-00001.xml').write_text('old', encoding='utf-8')
             app.atomic_csv(folder/'capture.csv',[],app.FIELDS)
             args=argparse.Namespace(output=str(folder),resume=True,serial=None)
             exporter=app.Exporter(args)
@@ -83,7 +83,7 @@ class ExporterTests(unittest.TestCase):
     def test_interrupted_resume_orchestration_uses_mocked_adb_and_preserves_raw(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp); (folder/'raw').mkdir()
-            old_raw=folder/'raw'/'screen-00001.xml'; old_raw.write_text('preserve-me')
+            old_raw=folder/'raw'/'screen-00001.xml'; old_raw.write_text('preserve-me', encoding='utf-8')
             parsed=app.parse_screen(FIXTURE.read_bytes())
             old_row=parsed['rows'][0]
             old_row.update(list_sequence=1,capture_date='2025-01-08',source_capture=folder.name,source_session_id='old')
@@ -100,7 +100,7 @@ class ExporterTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv,0,b'',b'')
             with mock.patch.object(app.subprocess,'run',side_effect=fake_run):
                 exporter.run()
-            self.assertEqual(old_raw.read_text(),'preserve-me')
+            self.assertEqual(old_raw.read_text(encoding='utf-8'),'preserve-me')
             self.assertTrue((folder/'raw'/'screen-00002.xml').exists())
             self.assertEqual(sum(int(r['grouped_trip_count']) for r in exporter.rows),3)
             self.assertEqual(next(r for r in exporter.reports if r.get('month')=='2025-01')['status'],'complete')
@@ -131,7 +131,7 @@ class ExporterTests(unittest.TestCase):
                 calls.append(parts)
                 if parts == ('shell','settings','get','system','screen_off_timeout'):
                     return b'60000'
-                state=json.loads((exporter.data_dir/'capture-state.json').read_text())
+                state=json.loads((exporter.data_dir/'capture-state.json').read_text(encoding='utf-8'))
                 session=state['manifest']['sessions'][-1]
                 self.assertEqual(session['keep_awake_original_timeout'],'60000')
                 self.assertEqual(session['keep_awake_device_serial'],'MOCK-SERIAL')
@@ -227,7 +227,7 @@ class ExporterTests(unittest.TestCase):
             def terminate(_exporter):
                 signal.raise_signal(signal.SIGTERM)
             def fake_reports(folder,replacements,formats):
-                (Path(folder)/'journeys.xlsx').write_text('mocked report')
+                (Path(folder)/'journeys.xlsx').write_text('mocked report', encoding='utf-8')
             with mock.patch.object(app.sys,'argv',['cli','--month','2026-10','--output',str(out)]), \
                  mock.patch.object(app,'adb_devices',return_value=[['MOCK','device']]), \
                  mock.patch.object(app.Exporter,'run',terminate), \
@@ -246,7 +246,7 @@ class ExporterTests(unittest.TestCase):
                 if parts[-1] == '60000': raise RuntimeError('device disconnected')
                 return b''
             def fail_capture(_exporter): raise RuntimeError('simulated screen failure')
-            def fake_reports(folder,replacements,formats): (Path(folder)/'journeys.xlsx').write_text('mocked report')
+            def fake_reports(folder,replacements,formats): (Path(folder)/'journeys.xlsx').write_text('mocked report', encoding='utf-8')
             with mock.patch.object(app.sys,'argv',['cli','--month','2026-10','--output',str(out),'--keep-awake']), \
                  mock.patch.object(app,'adb_devices',return_value=[['MOCK-SERIAL','device']]), \
                  mock.patch.object(app.Exporter,'command',adb_command), \
@@ -255,7 +255,7 @@ class ExporterTests(unittest.TestCase):
                  contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as stderr:
                 self.assertEqual(app.main(),1)
             self.assertIn("adb -s 'MOCK-SERIAL' shell settings put system screen_off_timeout '60000'",stderr.getvalue())
-            state=json.loads((out/'capture-data'/'capture-state.json').read_text())
+            state=json.loads((out/'capture-data'/'capture-state.json').read_text(encoding='utf-8'))
             self.assertTrue(state['manifest']['sessions'][-1]['keep_awake_restore_pending'])
 
     def test_doctor_removes_only_its_temporary_xml_even_after_parse_failure(self):
@@ -351,14 +351,14 @@ class ExporterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp)
             app.write_manifest(folder, {'selection':['2026-09','2026-10'],'created_at':'x','timezone':'UTC','settings':{}})
-            (folder/'capture.csv').write_text(','.join(app.FIELDS)+'\n')
+            (folder/'capture.csv').write_text(','.join(app.FIELDS)+'\n', encoding='utf-8')
             app.atomic_json(folder/'checks.json',[{'month':'2026-09','status':'in_progress','expected_trip_count':0}])
             app.build_reports(folder)
             workbook=app.load_validated_workbook(folder/'journeys.xlsx')
             months=[r[0] for r in workbook['Monthly summary'].iter_rows(min_row=2,values_only=True) if r[0] and r[0] != 'TOTAL']
             self.assertEqual(months,['2026-09','2026-10'])
             self.assertEqual(workbook['Monthly summary']['B2'].value,'incomplete')
-            saved_checks=json.loads((folder/'checks.json').read_text())
+            saved_checks=json.loads((folder/'checks.json').read_text(encoding='utf-8'))
             self.assertEqual(saved_checks[0]['status'],'in_progress')
             self.assertIn('Warnings',[cell.value for cell in workbook['Monthly summary'][1]])
             self.assertEqual(workbook['Monthly summary']['B2'].value,'incomplete')
@@ -389,7 +389,7 @@ class ExporterTests(unittest.TestCase):
                 app.atomic_json(source/'checks.json',[{'month':'2026-01','status':'complete','expected_trip_count':2,'expected_distance_displayed':'2','represented_trip_count':2,'distance_sum_km':2}])
                 app.write_manifest(source,{'version':1,'selection':['2026-01'],'settings':{},'sessions':[]})
             output=app.merge_directories(sources,root/'merged')
-            checks=json.loads((output/'capture-data'/'checks.json').read_text())
+            checks=json.loads((output/'capture-data'/'checks.json').read_text(encoding='utf-8'))
             check=checks[0]
             self.assertEqual(sum(int(r['grouped_trip_count']) for r in app.read_capture_rows(output/'capture-data')),3)
             self.assertEqual(check['represented_trip_count'],3)
@@ -407,7 +407,7 @@ class ExporterTests(unittest.TestCase):
                 app.atomic_json(source/'checks.json',[{'month':'2026-01','status':status,'expected_trip_count':2}])
                 app.write_manifest(source,{'selection':['2026-01'],'settings':{},'sessions':[]})
             merged=app.merge_directories(sources,root/'merged')
-            check=json.loads((merged/'capture-data'/'checks.json').read_text())[0]
+            check=json.loads((merged/'capture-data'/'checks.json').read_text(encoding='utf-8'))[0]
             self.assertEqual(check['status'],'complete')
             self.assertEqual(check['represented_trip_count'],2)
             self.assertTrue(any('complete source capture proves' in warning for warning in check['warnings']))
@@ -422,7 +422,7 @@ class ExporterTests(unittest.TestCase):
                 app.atomic_json(source/'checks.json',[{'month':'2026-01','status':'incomplete','expected_trip_count':2}])
                 app.write_manifest(source,{'selection':['2026-01'],'settings':{},'sessions':[]})
             merged=app.merge_directories(sources,root/'merged')
-            check=json.loads((merged/'capture-data'/'checks.json').read_text())[0]
+            check=json.loads((merged/'capture-data'/'checks.json').read_text(encoding='utf-8'))[0]
             self.assertEqual(check['represented_trip_count'],2)
             self.assertEqual(check['status'],'incomplete')
             self.assertTrue(any('matching merged counts alone are insufficient' in warning for warning in check['warnings']))
@@ -502,8 +502,9 @@ class ExporterTests(unittest.TestCase):
                 app.write_manifest(source,{'selection':['2025-01'],'settings':{},'sessions':[{'session_id':f'session-{index}'}]})
                 app.atomic_json(source/'checks.json',[{'month':'2025-01','status':'incomplete','expected_trip_count':3}])
             out=app.merge_directories(sources,root/'merged')
-            state=json.loads((out/'capture-data'/'capture-state.json').read_text())
+            state=json.loads((out/'capture-data'/'capture-state.json').read_text(encoding='utf-8'))
             self.assertEqual([r['raw_text'] for r in state['rows']],[r['raw_text'] for r in rows])
+            self.assertIn('·',state['rows'][0]['raw_text'])
             self.assertIn(app.capture_identifier(sources[0],{'sessions':[{'session_id':'session-1'}]}),state['rows'][0]['source_capture'])
             self.assertIn(app.capture_identifier(sources[1],{'sessions':[{'session_id':'session-2'}]}),state['rows'][0]['source_capture'])
             self.assertNotIn(str(root),state['manifest']['source_captures'][0])
@@ -516,6 +517,27 @@ class ExporterTests(unittest.TestCase):
             self.assertEqual(cli_result,2)
             self.assertIn('Merge is incomplete',stdout.getvalue())
             self.assertTrue((cli_out/'capture-data'/'capture-state.json').exists())
+
+    def test_main_makes_console_output_safe_for_restrictive_encodings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out=Path(tmp)/'capture'
+            stdout_bytes=io.BytesIO(); stderr_bytes=io.BytesIO()
+            stdout=io.TextIOWrapper(stdout_bytes,encoding='ascii',errors='strict')
+            stderr=io.TextIOWrapper(stderr_bytes,encoding='ascii',errors='strict')
+            def finish_capture(exporter):
+                exporter.reports[0].update(status='complete',expected_trip_count=0)
+            def write_mock_report(folder,replacements,formats):
+                (Path(folder)/'journeys.xlsx').write_text('mock report',encoding='utf-8')
+            with mock.patch.object(app.sys,'argv',['cli','--month','2026-10','--output',str(out)]), \
+                 mock.patch.object(app,'adb_devices',return_value=[['MOCK','device']]), \
+                 mock.patch.object(app.Exporter,'run',finish_capture), \
+                 mock.patch.object(app,'build_reports',side_effect=write_mock_report), \
+                 mock.patch.object(app.sys,'stdout',stdout), mock.patch.object(app.sys,'stderr',stderr):
+                self.assertEqual(app.main(),0)
+                stdout.flush(); stderr.flush()
+                output=stdout_bytes.getvalue()
+                self.assertIn(b'\\u2192',output)
+                self.assertIn(b'All journeys',output)
 
     @unittest.skipUnless(HAS_OPENPYXL, 'XLSX tests require the declared openpyxl dependency')
     def test_xlsx_has_numeric_cells_and_valid_relationships(self):
@@ -637,10 +659,10 @@ class ExporterTests(unittest.TestCase):
             for i, row in enumerate(rows, 1): row.update(list_sequence=i, capture_date='2025-01-08')
             with (folder/'journeys.csv').open('w', newline='', encoding='utf-8-sig') as f:
                 w=csv.DictWriter(f, fieldnames=app.FIELDS); w.writeheader(); w.writerows(rows)
-            (folder/'checks.json').write_text(json.dumps([{'month':'2025-01','expected_trip_count':3,'expected_distance_displayed':'123,4','status':'complete'}]))
+            (folder/'checks.json').write_text(json.dumps([{'month':'2025-01','expected_trip_count':3,'expected_distance_displayed':'123,4','status':'complete'}]), encoding='utf-8')
             app.build_reports(folder)
             self.assertTrue((folder/'journeys.xlsx').exists())
-            data=json.loads((folder/'journeys.json').read_text())
+            data=json.loads((folder/'journeys.json').read_text(encoding='utf-8'))
             self.assertEqual(sum(int(x['grouped_trip_count']) for x in data['entries']),3)
             self.assertEqual(data['entries'][0]['resolved_date'],'2025-01-08')
             self.assertTrue((folder/'journeys.xml').exists())
@@ -687,31 +709,31 @@ class ExporterTests(unittest.TestCase):
             self.assertTrue((folder/'journeys.xlsx').exists())
             for name in ('journeys.csv','journeys.json','journeys.xml'):
                 self.assertFalse((folder/name).exists(), name)
-            self.assertEqual(json.loads((folder/'checks.json').read_text())[0]['status'],'complete')
+            self.assertEqual(json.loads((folder/'checks.json').read_text(encoding='utf-8'))[0]['status'],'complete')
 
     def test_capture_data_cleanup_preserves_unowned_files_and_retention_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'capture'; data=out/'capture-data'; raw=data/'raw'; raw.mkdir(parents=True)
-            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}')
+            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}', encoding='utf-8')
             for name in ('capture-state.json','capture.csv','checks.json','manifest.json'):
-                (data/name).write_text('owned')
-            (raw/'screen-00001.xml').write_text('<xml/>')
-            (data/'user-note.txt').write_text('preserve')
+                (data/name).write_text('owned', encoding='utf-8')
+            (raw/'screen-00001.xml').write_text('<xml/>', encoding='utf-8')
+            (data/'user-note.txt').write_text('preserve', encoding='utf-8')
             app.cleanup_capture_data(out)
             self.assertTrue((out/'journeys.xlsx').parent.exists())
-            self.assertEqual((data/'user-note.txt').read_text(),'preserve')
+            self.assertEqual((data/'user-note.txt').read_text(encoding='utf-8'),'preserve')
             self.assertFalse((data/'capture.csv').exists())
             self.assertFalse((raw/'screen-00001.xml').exists())
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'capture'; data=out/'capture-data'; raw=data/'raw'; raw.mkdir(parents=True)
-            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}')
-            (data/'capture.csv').write_text('saved'); (raw/'screen-00001.xml').write_text('<xml/>')
+            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}', encoding='utf-8')
+            (data/'capture.csv').write_text('saved', encoding='utf-8'); (raw/'screen-00001.xml').write_text('<xml/>', encoding='utf-8')
             app.cleanup_capture_data(out,keep_capture=True)
             self.assertTrue((data/'capture.csv').exists()); self.assertFalse((raw/'screen-00001.xml').exists())
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'capture'; data=out/'capture-data'; raw=data/'raw'; raw.mkdir(parents=True)
-            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}')
-            (data/'capture.csv').write_text('saved'); (raw/'screen-00001.xml').write_text('<xml/>')
+            (data/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}', encoding='utf-8')
+            (data/'capture.csv').write_text('saved', encoding='utf-8'); (raw/'screen-00001.xml').write_text('<xml/>', encoding='utf-8')
             app.cleanup_capture_data(out,keep_capture=True,keep_debug=True)
             self.assertTrue((raw/'screen-00001.xml').exists())
 
@@ -725,12 +747,12 @@ class ExporterTests(unittest.TestCase):
                     def __init__(self,args):
                         self.out=Path(args.output); self.out.mkdir()
                         self.data_dir=self.out/'capture-data'; (self.data_dir/'raw').mkdir(parents=True)
-                        (self.data_dir/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}')
-                        (self.data_dir/'raw'/'screen-00001.xml').write_text('<xml/>')
+                        (self.data_dir/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}', encoding='utf-8')
+                        (self.data_dir/'raw'/'screen-00001.xml').write_text('<xml/>', encoding='utf-8')
                         self.rows=[{'month':'2026-01','grouped_trip_count':1}] if outcome=='complete' else []; self.reports=[]; self.session={}; self.outcome=outcome
                     def checkpoint(self):
                         for name in ('capture-state.json','capture.csv','checks.json','manifest.json'):
-                            (self.data_dir/name).write_text('checkpoint')
+                            (self.data_dir/name).write_text('checkpoint', encoding='utf-8')
                     def run(self):
                         if self.outcome=='interrupt': raise KeyboardInterrupt()
                         self.reports[0]['status']='incomplete' if self.outcome=='incomplete' else 'complete'
@@ -739,7 +761,7 @@ class ExporterTests(unittest.TestCase):
                 def fake_reports(folder,replacements,formats):
                     seen['formats']=formats
                     if report_failure: raise OSError('simulated report failure')
-                    (Path(folder)/'journeys.xlsx').write_text('validated output')
+                    (Path(folder)/'journeys.xlsx').write_text('validated output', encoding='utf-8')
                 stdout=io.StringIO(); stderr=io.StringIO()
                 with mock.patch.object(app.sys,'argv',['cli','--month','2026-01','--output',str(out)]), \
                      mock.patch.object(app,'adb_devices',return_value=[['MOCK','device']]), \
@@ -767,19 +789,19 @@ class ExporterTests(unittest.TestCase):
                     def __init__(self,args):
                         self.out=Path(args.output); self.out.mkdir()
                         self.data_dir=self.out/'capture-data'; (self.data_dir/'raw').mkdir(parents=True)
-                        (self.data_dir/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}')
-                        (self.data_dir/'raw'/'screen-00001.xml').write_text('<xml/>')
+                        (self.data_dir/'.owner.json').write_text('{"kind":"bmw-journey-exporter-capture-data","owned_raw_files":["raw/screen-00001.xml"]}', encoding='utf-8')
+                        (self.data_dir/'raw'/'screen-00001.xml').write_text('<xml/>', encoding='utf-8')
                         self.rows=[{'month':'2026-01','grouped_trip_count':1}]; self.reports=[]; self.session={}
                     def checkpoint(self):
                         for name in ('capture-state.json','capture.csv','checks.json','manifest.json'):
-                            (self.data_dir/name).write_text('checkpoint')
+                            (self.data_dir/name).write_text('checkpoint', encoding='utf-8')
                     def run(self):
                         self.reports[0]['status']='complete'; self.reports[0]['expected_trip_count']=1
                     def restore_keep_awake(self): pass
                 with mock.patch.object(app.sys,'argv',['cli','--month','2026-01','--output',str(out),flag]), \
                      mock.patch.object(app,'adb_devices',return_value=[['MOCK','device']]), \
                      mock.patch.object(app,'Exporter',FakeExporter), \
-                     mock.patch.object(app,'build_reports',side_effect=lambda folder,replacements,formats: (Path(folder)/'journeys.xlsx').write_text('ok')) , \
+                     mock.patch.object(app,'build_reports',side_effect=lambda folder,replacements,formats: (Path(folder)/'journeys.xlsx').write_text('ok', encoding='utf-8')) , \
                      contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(app.main(),0)
                 data=out/'capture-data'

@@ -35,6 +35,19 @@ CAPTURE_DATA_DIR = 'capture-data'
 EXPORT_FORMATS = ('xlsx', 'csv', 'json', 'xml')
 
 
+def configure_console_streams():
+    """Keep diagnostics printable without changing a terminal's encoding."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure:
+            try:
+                reconfigure(errors='backslashreplace')
+            except (OSError, ValueError):
+                # Some wrappers expose reconfigure but are already closed or
+                # otherwise immutable. Leave those wrappers to their caller.
+                pass
+
+
 def clean(s):
     return str(s or '').replace('\xa0', ' ').replace('\u202f', ' ').strip()
 
@@ -1334,6 +1347,7 @@ def doctor(serial=None):
 
 
 def main():
+    configure_console_streams()
     p = argparse.ArgumentParser(description='Capture the English My BMW journey list through an already running ADB server, then generate reports.', allow_abbrev=False)
     p.add_argument('--doctor', action='store_true', help='Check ADB server, device authorization, and the current list screen without navigating.')
     p.add_argument('--report-only', metavar='DIR', help='Regenerate reports from saved data without connecting a phone.')
