@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible problem with BMW Journey Exporter.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not upload real journey exports, raw phone XML, addresses, VINs,
+        device serials, credentials, or other personal data. Remove those details
+        from command output before sharing it.
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system and version
+      placeholder: macOS 15.2, Windows 11, Ubuntu 24.04
+    validations:
+      required: true
+  - type: dropdown
+    id: installation-method
+    attributes:
+      label: Installation method
+      options:
+        - Docker
+        - Local Python
+    validations:
+      required: true
+  - type: input
+    id: project-version
+    attributes:
+      label: Project version or commit
+      description: Use the commit hash if you are running from a checkout.
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: My BMW app version
+      description: Optional; leave blank if unknown.
+    validations:
+      required: false
+  - type: input
+    id: app-language
+    attributes:
+      label: My BMW app language
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command used
+      description: Include the command and relevant non-sensitive configuration.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List the steps needed to reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Sanitized error output (optional)
+      description: Remove personal data and credentials before pasting.
+      render: text
+    validations:
+      required: false

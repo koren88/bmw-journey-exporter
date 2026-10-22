@@ -235,3 +235,5 @@ python bmw_export_journeys.py --help
 ```
 
 `make test` prefers `.venv/bin/python`, then `python3`, and falls back to Docker if project dependencies are missing; set `PYTHON=/path/to/python` to choose an interpreter. Contributions should preserve original source values, avoid real journey data in fixtures, and include tests for parser, merge, date, report and launcher changes. Do not add BMW account authentication or private API calls. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+For community reports, see the [bug report form](https://github.com/koren88/bmw-journey-exporter/issues/new?template=bug_report.yml), [feature request form](https://github.com/koren88/bmw-journey-exporter/issues/new?template=feature_request.yml), [accessibility notes](ACCESSIBILITY.md), and [security policy](SECURITY.md).
